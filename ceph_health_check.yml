@@ -1,6 +1,6 @@
 ---
 - hosts: yourhostshere
-  name: Ceph Health Check
+  name: Ceph Health Check After Node Reboot
   any_errors_fatal: true
   serial: 1
   tasks:
@@ -24,22 +24,14 @@
       command: ceph osd tree --format=json
       register: ceph_osd_tree
 
-    - name: Get OSDs not in "up" state
-      set_fact:
-        osds_not_up: "{{ ceph_osd_tree.stdout | from_json | json_query('nodes[?type==`osd` && status!=`up`]') }}"
-
-    - name: Get OSDs with reweight value not greater than 0
-      set_fact:
-        osds_reweight_zero: "{{ ceph_osd_tree.stdout | from_json | json_query('nodes[?type==`osd` && reweight==`0`]') }}"
-
-    - name: Combine OSD lists
-      set_fact:
-        combined_osds: "{{ osds_not_up + osds_reweight_zero }}"
-
-    - name: Display OSDs not in "up" state or with reweight value not greater than 0
-      debug:
-        msg: "OSD {{ item.id }} named {{ item.name }} is not in 'up' state or has a reweight value not greater than 0."
-      loop: "{{ combined_osds }}"
+    - name: Ensure all OSDs are 'up' and 'in'
+      assert:
+        that:
+          - "item.status == 'up'"
+          - "item.reweight > 0"
+        fail_msg: "OSD {{ item.id }} named {{ item.name }} is not in 'up' state or has a reweight value not greater than 0."
+        success_msg: "All OSDs are in 'up' state and have reweight value greater than 0."
+      loop: "{{ ceph_osd_tree.stdout | from_json | json_query('nodes[?type==`osd`]') }}"
       loop_control:
         label: "{{ item.id }}"
 
@@ -50,4 +42,3 @@
         (ceph_mgr_dump.stdout | from_json).active_name is defined and (ceph_mgr_dump.stdout | from_json).active_name != ""
       retries: 60
       delay: 10
-
