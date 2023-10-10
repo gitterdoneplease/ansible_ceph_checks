@@ -1,0 +1,8 @@
+---
+- import_playbook: ceph_health_check.yml
+
+- import_playbook: reboot_playbook.yml
+
+- import_playbook: ceph_health_check.yml
+  when: reboot_needed is defined and reboot_needed
+

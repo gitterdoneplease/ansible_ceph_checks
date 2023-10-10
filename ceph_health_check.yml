@@ -1,0 +1,53 @@
+---
+- hosts: yourhostshere
+  name: Ceph Health Check
+  any_errors_fatal: true
+  serial: 1
+  tasks:
+    - name: Check Ceph PG State
+      command: ceph pg stat --format=json
+      register: ceph_pg_stat
+      until: >
+        (ceph_pg_stat.stdout | from_json).pg_summary.num_pg_by_state | selectattr("name", "equalto", "active+clean") | map(attribute="num") | first == (ceph_pg_stat.stdout | from_json).pg_summary.num_pgs
+      retries: 60
+      delay: 10
+
+    - name: Check Ceph Cluster Health
+      command: ceph health --format=json
+      register: ceph_health
+      until: >
+        (ceph_health.stdout | from_json).status == 'HEALTH_OK'
+      retries: 60
+      delay: 10
+
+    - name: Get OSD status on current node
+      command: ceph osd tree --format=json
+      register: ceph_osd_tree
+
+    - name: Get OSDs not in "up" state
+      set_fact:
+        osds_not_up: "{{ ceph_osd_tree.stdout | from_json | json_query('nodes[?type==`osd` && status!=`up`]') }}"
+
+    - name: Get OSDs with reweight value not greater than 0
+      set_fact:
+        osds_reweight_zero: "{{ ceph_osd_tree.stdout | from_json | json_query('nodes[?type==`osd` && reweight==`0`]') }}"
+
+    - name: Combine OSD lists
+      set_fact:
+        combined_osds: "{{ osds_not_up + osds_reweight_zero }}"
+
+    - name: Display OSDs not in "up" state or with reweight value not greater than 0
+      debug:
+        msg: "OSD {{ item.id }} named {{ item.name }} is not in 'up' state or has a reweight value not greater than 0."
+      loop: "{{ combined_osds }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    - name: Check Ceph MGR status
+      command: ceph mgr dump --format=json
+      register: ceph_mgr_dump
+      until: >
+        (ceph_mgr_dump.stdout | from_json).active_name is defined and (ceph_mgr_dump.stdout | from_json).active_name != ""
+      retries: 60
+      delay: 10
+
